@@ -4,6 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import { layoutConcentricOrbit } from "@/lib/orbitLayout";
 import { subscribeToUsers, type UserProfile } from "@/lib/users";
 
+const RING_COLORS = [
+  "border-sky-500",
+  "border-violet-500",
+  "border-amber-500",
+  "border-emerald-500",
+  "border-rose-500",
+  "border-cyan-500",
+  "border-orange-500",
+  "border-indigo-500",
+] as const;
+
 const NODE_SIZE = 96;
 const CENTER_SIZE = 168;
 
@@ -39,7 +50,7 @@ function UserNode({ user }: { user: UserProfile }) {
 
   return (
     <div
-      className="flex size-full flex-col items-center justify-center gap-1.5 px-2"
+      className="flex size-full flex-col items-center justify-center gap-0.5 px-1"
       title={user.displayName ?? user.email ?? user.uid}
     >
       {showPhoto ? (
@@ -63,23 +74,32 @@ function UserNode({ user }: { user: UserProfile }) {
   );
 }
 
-export function UserOrbitGraph() {
-  const [users, setUsers] = useState<UserProfile[] | null>(null);
+type UserOrbitGraphProps = {
+  /** When set, skips Firestore and renders this list (UI testing). */
+  users?: UserProfile[];
+};
+
+export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
+  const [liveUsers, setLiveUsers] = useState<UserProfile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const useStatic = usersProp !== undefined;
 
   useEffect(() => {
+    if (useStatic) return;
     return subscribeToUsers(
       (next) => {
-        setUsers(next);
+        setLiveUsers(next);
         setError(null);
       },
       (err) => {
         console.error("Failed to load users:", err);
         setError("Could not load users. Check Firestore read rules.");
-        setUsers([]);
+        setLiveUsers([]);
       },
     );
-  }, []);
+  }, [useStatic]);
+
+  const users = useStatic ? usersProp : liveUsers;
 
   const layout = useMemo(
     () =>
@@ -128,7 +148,7 @@ export function UserOrbitGraph() {
               <div
                 key={ring}
                 aria-hidden
-                className="pointer-events-none absolute rounded-full border border-zinc-200/70"
+                className={`pointer-events-none absolute rounded-full border-[2.5px] ${RING_COLORS[ring % RING_COLORS.length]}`}
                 style={{
                   width: ringRadius * 2,
                   height: ringRadius * 2,
