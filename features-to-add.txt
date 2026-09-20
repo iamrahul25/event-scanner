@@ -1,13 +1,13 @@
 Features to add: 
 ----------------
-- Sign-in with Google option 
-- Database to use to store other user info -> Baas -> Firebase (Firestore) 
 - User can create his profile, and should be able to add it's social profile details
-- A user can create a event - add its details and gener
-
-
+- A user can create a event - add its details and generate QR for that event, all 
+other user who are register to this platform can scan it and they will be linked to that event.
+And when opening that event all the participants 
 
 
 
 Features added: 
 ---------------
+- Sign-in with Google option 
+- Database to use to store other user info -> Baas -> Firebase (Firestore) 
