@@ -10,11 +10,28 @@ import {
 import type { User } from "firebase/auth";
 import { db } from "./firebase";
 
+export type SocialLinks = {
+  instagram: string | null;
+  facebook: string | null;
+  linkedin: string | null;
+  twitter: string | null;
+  github: string | null;
+};
+
+export const EMPTY_SOCIAL_LINKS: SocialLinks = {
+  instagram: null,
+  facebook: null,
+  linkedin: null,
+  twitter: null,
+  github: null,
+};
+
 export type UserProfile = {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  socials: SocialLinks;
 };
 
 export async function upsertUserDoc(user: User) {
@@ -35,12 +52,32 @@ export async function upsertUserDoc(user: User) {
   );
 }
 
+function readOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toSocialLinks(data: Record<string, unknown>): SocialLinks {
+  const raw =
+    data.socials && typeof data.socials === "object"
+      ? (data.socials as Record<string, unknown>)
+      : data;
+
+  return {
+    instagram: readOptionalString(raw.instagram),
+    facebook: readOptionalString(raw.facebook),
+    linkedin: readOptionalString(raw.linkedin),
+    twitter: readOptionalString(raw.twitter),
+    github: readOptionalString(raw.github),
+  };
+}
+
 function toUserProfile(id: string, data: Record<string, unknown>): UserProfile {
   return {
     uid: typeof data.uid === "string" ? data.uid : id,
     email: typeof data.email === "string" ? data.email : null,
     displayName: typeof data.displayName === "string" ? data.displayName : null,
     photoURL: typeof data.photoURL === "string" ? data.photoURL : null,
+    socials: toSocialLinks(data),
   };
 }
 
