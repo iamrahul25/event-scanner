@@ -1,6 +1,9 @@
 Features to add: 
 ----------------
-
+- Sign-in with Google option 
+- Database to use to store other user info -> Baas -> Firebase (Firestore) 
+- User can create his profile, and should be able to add it's social profile details
+- A user can create a event - add its details and gener
 
 
 
