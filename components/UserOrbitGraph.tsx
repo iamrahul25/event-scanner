@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { layoutConcentricOrbit } from "@/lib/orbitLayout";
 import {
   subscribeToUsers,
@@ -23,7 +23,11 @@ const NODE_SIZE = 96;
 const CENTER_SIZE = 168;
 const CHILD_W = 118;
 const CHILD_H = 52;
-const BRANCH_DISTANCE = 148;
+const BRANCH_DISTANCE = 160;
+/** Minimum center-to-center gap so detail cards never overlap. */
+const CHILD_MIN_SEP = Math.hypot(CHILD_W, CHILD_H) * 0.72 + 20;
+/** Extra padding around the expanded cluster when auto-scrolling into view. */
+const FOCUS_PAD = 48;
 
 const SOCIAL_META: {
   key: keyof SocialLinks;
@@ -114,7 +118,7 @@ function branchItemsFor(user: UserProfile): BranchItem[] {
   return items;
 }
 
-/** Fan child nodes outward from the parent, away from the hub. */
+/** Fan child nodes outward from the parent with spacing that prevents overlap. */
 function layoutBranches(
   parentX: number,
   parentY: number,
@@ -124,16 +128,59 @@ function layoutBranches(
 
   const radial = Math.atan2(parentY, parentX);
   const count = items.length;
-  const spread = Math.min(Math.PI * 0.85, 0.42 * Math.max(count - 1, 1));
-  const start = radial - spread / 2;
+
+  if (count === 1) {
+    const item = items[0]!;
+    return [
+      {
+        ...item,
+        x: parentX + Math.cos(radial) * BRANCH_DISTANCE,
+        y: parentY + Math.sin(radial) * BRANCH_DISTANCE,
+      },
+    ];
+  }
+
+  const maxSpread = Math.PI * 0.92;
+  let distance = BRANCH_DISTANCE;
+
+  // Grow the fan radius until angular spacing leaves enough chord length
+  // between neighboring card centers.
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const halfChord = CHILD_MIN_SEP / (2 * distance);
+    if (halfChord >= 1) {
+      distance += 20;
+      continue;
+    }
+    const minAngle = 2 * Math.asin(halfChord);
+    const spread = minAngle * (count - 1);
+    if (spread <= maxSpread) {
+      const start = radial - spread / 2;
+      return items.map((item, i) => {
+        const angle = start + minAngle * i;
+        return {
+          ...item,
+          x: parentX + Math.cos(angle) * distance,
+          y: parentY + Math.sin(angle) * distance,
+        };
+      });
+    }
+    distance += 20;
+  }
+
+  // Fallback: column stacked along the tangent (always non-overlapping).
+  const tangentX = -Math.sin(radial);
+  const tangentY = Math.cos(radial);
+  const outX = Math.cos(radial);
+  const outY = Math.sin(radial);
+  const stackGap = CHILD_H + 16;
+  const totalSpan = (count - 1) * stackGap;
 
   return items.map((item, i) => {
-    const angle =
-      count === 1 ? radial : start + (spread * i) / Math.max(count - 1, 1);
+    const along = i * stackGap - totalSpan / 2;
     return {
       ...item,
-      x: parentX + Math.cos(angle) * BRANCH_DISTANCE,
-      y: parentY + Math.sin(angle) * BRANCH_DISTANCE,
+      x: parentX + outX * (BRANCH_DISTANCE + 24) + tangentX * along,
+      y: parentY + outY * (BRANCH_DISTANCE + 24) + tangentY * along,
     };
   });
 }
@@ -200,6 +247,8 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
   const [liveUsers, setLiveUsers] = useState<UserProfile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const focusRef = useRef<HTMLDivElement>(null);
   const useStatic = usersProp !== undefined;
 
   useEffect(() => {
@@ -271,6 +320,57 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
   const canvasSize = Math.ceil(Math.max(extent * 2, CENTER_SIZE + 64));
   const center = canvasSize / 2;
 
+  const focusBounds = useMemo(() => {
+    if (!selectedPos) return null;
+
+    let minX = center + selectedPos.x - NODE_SIZE / 2;
+    let maxX = center + selectedPos.x + NODE_SIZE / 2;
+    let minY = center + selectedPos.y - NODE_SIZE / 2;
+    let maxY = center + selectedPos.y + NODE_SIZE / 2;
+
+    for (const b of branches) {
+      minX = Math.min(minX, center + b.x - CHILD_W / 2);
+      maxX = Math.max(maxX, center + b.x + CHILD_W / 2);
+      minY = Math.min(minY, center + b.y - CHILD_H / 2);
+      maxY = Math.max(maxY, center + b.y + CHILD_H / 2);
+    }
+
+    return {
+      left: minX - FOCUS_PAD,
+      top: minY - FOCUS_PAD,
+      width: maxX - minX + FOCUS_PAD * 2,
+      height: maxY - minY + FOCUS_PAD * 2,
+    };
+  }, [selectedPos, branches, center]);
+
+  useLayoutEffect(() => {
+    if (!selectedUid || !focusBounds) return;
+
+    const scroller = scrollRef.current;
+    const focus = focusRef.current;
+    if (!scroller || !focus) return;
+
+    const clusterCenterX = focusBounds.left + focusBounds.width / 2;
+    const clusterCenterY = focusBounds.top + focusBounds.height / 2;
+
+    scroller.scrollTo({
+      left: Math.max(0, clusterCenterX - scroller.clientWidth / 2),
+      top: Math.max(0, clusterCenterY - scroller.clientHeight / 2),
+      behavior: "smooth",
+    });
+
+    // Also bring the cluster into the browser window frame.
+    const frame = window.requestAnimationFrame(() => {
+      focus.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "center",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedUid, focusBounds]);
+
   if (users === null) {
     return (
       <div className="flex min-h-[320px] w-full items-center justify-center text-sm text-zinc-500">
@@ -310,7 +410,10 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
         </p>
       )}
 
-      <div className="w-full overflow-auto">
+      <div
+        ref={scrollRef}
+        className="max-h-[min(100dvh-9rem,920px)] w-full overflow-auto"
+      >
         <div
           className="relative mx-auto shrink-0"
           style={{ width: px(canvasSize), height: px(canvasSize) }}
@@ -318,6 +421,19 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
             if (selectedUid) setSelectedUid(null);
           }}
         >
+          {focusBounds ? (
+            <div
+              ref={focusRef}
+              aria-hidden
+              className="pointer-events-none absolute z-0"
+              style={{
+                left: px(focusBounds.left),
+                top: px(focusBounds.top),
+                width: px(focusBounds.width),
+                height: px(focusBounds.height),
+              }}
+            />
+          ) : null}
           {/* Soft ring guides (decorative, not interactive) */}
           {Array.from({ length: layout.ringCount }, (_, ring) => {
             const ringRadius =
@@ -339,31 +455,14 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
             );
           })}
 
-          {/* Connector lines — parent hub → selected user → children */}
-          {selectedPos && selectedUser ? (
+          {/* Connector lines — selected user → social children */}
+          {selectedPos && selectedUser && branches.length > 0 ? (
             <svg
               className="pointer-events-none absolute inset-0 z-[4] overflow-visible"
               width={canvasSize}
               height={canvasSize}
               aria-hidden
             >
-              <path
-                d={curvePath(
-                  center,
-                  center,
-                  center + selectedPos.x,
-                  center + selectedPos.y,
-                )}
-                fill="none"
-                stroke="#0ea5e9"
-                strokeWidth={2}
-                strokeLinecap="round"
-                className="animate-[orbit-draw_420ms_ease-out]"
-                style={{
-                  strokeDasharray: 600,
-                  strokeDashoffset: 0,
-                }}
-              />
               {branches.map((branch, i) => (
                 <path
                   key={branch.id}
