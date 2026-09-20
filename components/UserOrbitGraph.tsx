@@ -1,50 +1,41 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutConcentricOrbit } from "@/lib/orbitLayout";
 import {
   subscribeToUsers,
-  type SocialLinks,
   type UserProfile,
 } from "@/lib/users";
+import { SOCIAL_META } from "@/lib/socials";
+import { FiMail, FiSearch } from "react-icons/fi";
+import { type IconType } from "react-icons";
+import { Mascot } from "page-mascot";
 
 const RING_COLORS = [
-  "border-sky-500",
-  "border-violet-500",
-  "border-amber-500",
-  "border-emerald-500",
-  "border-rose-500",
-  "border-cyan-500",
-  "border-orange-500",
-  "border-indigo-500",
+  "border-emerald-400/60",
+  "border-emerald-500/60",
+  "border-emerald-600/60",
+  "border-emerald-300/60",
 ] as const;
 
-const NODE_SIZE = 96;
-const CENTER_SIZE = 168;
-const CHILD_W = 118;
-const CHILD_H = 52;
-const BRANCH_DISTANCE = 160;
+const NODE_SIZE = 64;
+const CENTER_SIZE = 140;
+const CHILD_W = 132;
+const CHILD_H = 44;
+const BRANCH_DISTANCE = 80;
 /** Minimum center-to-center gap so detail cards never overlap. */
-const CHILD_MIN_SEP = Math.hypot(CHILD_W, CHILD_H) * 0.72 + 20;
+const CHILD_MIN_SEP = CHILD_W + 16;
 /** Extra padding around the expanded cluster when auto-scrolling into view. */
 const FOCUS_PAD = 48;
 
-const SOCIAL_META: {
-  key: keyof SocialLinks;
-  label: string;
-  short: string;
-}[] = [
-  { key: "instagram", label: "Instagram", short: "IG" },
-  { key: "facebook", label: "Facebook", short: "FB" },
-  { key: "linkedin", label: "LinkedIn", short: "in" },
-  { key: "twitter", label: "Twitter", short: "X" },
-  { key: "github", label: "GitHub", short: "GH" },
-];
+
 
 type BranchItem = {
   id: string;
   label: string;
-  short: string;
+  icon: IconType;
+  colorClass: string;
+  bgClass: string;
   href: string | null;
   detail: string;
 };
@@ -97,7 +88,9 @@ function branchItemsFor(user: UserProfile): BranchItem[] {
     items.push({
       id: "email",
       label: "Email",
-      short: "@",
+      icon: FiMail,
+      colorClass: "text-emerald-600",
+      bgClass: "bg-emerald-100",
       href: `mailto:${user.email}`,
       detail: user.email,
     });
@@ -109,7 +102,9 @@ function branchItemsFor(user: UserProfile): BranchItem[] {
     items.push({
       id: meta.key,
       label: meta.label,
-      short: meta.short,
+      icon: meta.icon,
+      colorClass: meta.colorClass,
+      bgClass: meta.bgClass,
       href,
       detail: displayHandle(href),
     });
@@ -123,10 +118,14 @@ function layoutBranches(
   parentX: number,
   parentY: number,
   items: BranchItem[],
+  isOutermost: boolean = false,
 ): BranchNode[] {
   if (items.length === 0) return [];
 
-  const radial = Math.atan2(parentY, parentX);
+  let radial = Math.atan2(parentY, parentX);
+  if (isOutermost) {
+    radial += Math.PI;
+  }
   const count = items.length;
 
   if (count === 1) {
@@ -231,7 +230,7 @@ function UserNode({ user }: { user: UserProfile }) {
           {initials(user)}
         </span>
       )}
-      <span className="max-w-full truncate text-center text-[11px] font-medium leading-tight text-zinc-800">
+      <span className="max-w-full truncate text-center text-[11px] font-medium leading-tight text-zinc-800 bg-zinc-50/80 backdrop-blur-sm px-1.5 py-0.5 rounded-full">
         {shortLabel(user)}
       </span>
     </div>
@@ -241,12 +240,15 @@ function UserNode({ user }: { user: UserProfile }) {
 type UserOrbitGraphProps = {
   /** When set, skips Firestore and renders this list (UI testing). */
   users?: UserProfile[];
+  eventName?: string;
 };
 
-export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
+export function UserOrbitGraph({ users: usersProp, eventName }: UserOrbitGraphProps = {}) {
   const [liveUsers, setLiveUsers] = useState<UserProfile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedUid, setSelectedUid] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showSearch, setShowSearch] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const focusRef = useRef<HTMLDivElement>(null);
   const useStatic = usersProp !== undefined;
@@ -282,11 +284,23 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
       layoutConcentricOrbit(users?.length ?? 0, {
         nodeSize: NODE_SIZE,
         centerSize: CENTER_SIZE,
-        gap: 28,
-        padding: 32,
+        gap: 16,
+        padding: 24,
       }),
     [users],
   );
+
+  const filteredUsers = useMemo(() => {
+    if (!users || !searchQuery) return [];
+    const q = searchQuery.toLowerCase();
+    return users
+      .filter(
+        (u) =>
+          u.displayName?.toLowerCase().includes(q) ||
+          u.email?.toLowerCase().includes(q)
+      )
+      .slice(0, 5);
+  }, [searchQuery, users]);
 
   const selectedIndex =
     users && selectedUid
@@ -303,19 +317,11 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
       selectedPos.x,
       selectedPos.y,
       branchItemsFor(selectedUser),
+      Math.hypot(selectedPos.x, selectedPos.y) + 180 > layout.radius,
     );
-  }, [selectedUser, selectedPos]);
+  }, [selectedUser, selectedPos, layout.radius]);
 
-  // Expand canvas so branch cards near the edge stay visible.
-  const extent = useMemo(() => {
-    let max = layout.radius;
-    for (const b of branches) {
-      const reach =
-        Math.hypot(b.x, b.y) + Math.hypot(CHILD_W / 2, CHILD_H / 2) + 24;
-      if (reach > max) max = reach;
-    }
-    return max;
-  }, [layout.radius, branches]);
+  const extent = layout.radius;
 
   const canvasSize = Math.ceil(Math.max(extent * 2, CENTER_SIZE + 64));
   const center = canvasSize / 2;
@@ -343,34 +349,6 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
     };
   }, [selectedPos, branches, center]);
 
-  useLayoutEffect(() => {
-    if (!selectedUid || !focusBounds) return;
-
-    const scroller = scrollRef.current;
-    const focus = focusRef.current;
-    if (!scroller || !focus) return;
-
-    const clusterCenterX = focusBounds.left + focusBounds.width / 2;
-    const clusterCenterY = focusBounds.top + focusBounds.height / 2;
-
-    scroller.scrollTo({
-      left: Math.max(0, clusterCenterX - scroller.clientWidth / 2),
-      top: Math.max(0, clusterCenterY - scroller.clientHeight / 2),
-      behavior: "smooth",
-    });
-
-    // Also bring the cluster into the browser window frame.
-    const frame = window.requestAnimationFrame(() => {
-      focus.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-        inline: "center",
-      });
-    });
-
-    return () => window.cancelAnimationFrame(frame);
-  }, [selectedUid, focusBounds]);
-
   if (users === null) {
     return (
       <div className="flex min-h-[320px] w-full items-center justify-center text-sm text-zinc-500">
@@ -384,7 +362,7 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
   }
 
   return (
-    <div className="relative w-full">
+    <div className="relative flex flex-1 flex-col h-full w-full">
       {error ? (
         <p className="mb-4 text-center text-sm text-red-600">{error}</p>
       ) : null}
@@ -396,7 +374,7 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
       ) : null}
 
       {selectedUser ? (
-        <p className="mb-3 text-center text-sm text-zinc-500">
+        <p className="shrink-0 pt-6 text-center text-sm text-zinc-500">
           Viewing{" "}
           <span className="font-medium text-zinc-700">
             {selectedUser.displayName ?? "user"}
@@ -405,15 +383,53 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
           click again or press Esc to collapse
         </p>
       ) : (
-        <p className="mb-3 text-center text-sm text-zinc-500">
+        <p className="shrink-0 pt-6 text-center text-sm text-zinc-500">
           Click a person to expand their profile on the map
         </p>
       )}
 
       <div
         ref={scrollRef}
-        className="max-h-[min(100dvh-9rem,920px)] w-full overflow-auto"
+        className="flex-1 w-full overflow-auto flex items-center justify-center"
       >
+        {/* Search Bar */}
+        <div className="absolute right-6 top-6 z-20 flex w-64 flex-col gap-1">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search attendees..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setShowSearch(true)}
+              onBlur={() => setTimeout(() => setShowSearch(false), 200)}
+              className="w-full rounded-full border border-zinc-200 bg-white/80 backdrop-blur-md py-2 pl-9 pr-4 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+            />
+            <FiSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
+          </div>
+          {showSearch && filteredUsers.length > 0 && (
+            <div className="absolute top-full mt-2 w-full rounded-xl border border-zinc-200 bg-white/95 p-2 backdrop-blur-xl">
+              {filteredUsers.map((u) => (
+                <button
+                  key={u.uid}
+                  onClick={() => {
+                    setSelectedUid(u.uid);
+                    setSearchQuery("");
+                    setShowSearch(false);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-zinc-100"
+                >
+                  <div className="flex size-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-[10px] font-bold text-zinc-600">
+                    {initials(u)}
+                  </div>
+                  <div className="min-w-0 flex-1 truncate text-sm font-medium text-zinc-900">
+                    {u.displayName ?? u.email}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <div
           className="relative mx-auto shrink-0"
           style={{ width: px(canvasSize), height: px(canvasSize) }}
@@ -437,14 +453,13 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
           {/* Soft ring guides (decorative, not interactive) */}
           {Array.from({ length: layout.ringCount }, (_, ring) => {
             const ringRadius =
-              CENTER_SIZE / 2 + NODE_SIZE / 2 + 28 + ring * (NODE_SIZE + 28);
+              CENTER_SIZE / 2 + NODE_SIZE / 2 + 16 + ring * (NODE_SIZE + 16);
             return (
               <div
                 key={ring}
                 aria-hidden
-                className={`pointer-events-none absolute rounded-full border-[2.5px] transition-opacity duration-300 ${RING_COLORS[ring % RING_COLORS.length]} ${
-                  selectedUid ? "opacity-25" : "opacity-100"
-                }`}
+                className={`pointer-events-none absolute rounded-full border transition-opacity duration-300 ${RING_COLORS[ring % RING_COLORS.length]} ${selectedUid ? "opacity-25" : "opacity-100"
+                  }`}
                 style={{
                   width: px(ringRadius * 2),
                   height: px(ringRadius * 2),
@@ -473,8 +488,9 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
                     center + branch.y,
                   )}
                   fill="none"
-                  stroke="#94a3b8"
-                  strokeWidth={1.75}
+                  stroke="#10b981"
+                  strokeOpacity={0.6}
+                  strokeWidth={1}
                   strokeLinecap="round"
                   style={{
                     animation: `orbit-fade-in 320ms ease-out ${80 + i * 45}ms both`,
@@ -486,9 +502,8 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
 
           {/* Center hub — Event Scanner */}
           <div
-            className={`absolute z-10 flex flex-col items-center justify-center rounded-full bg-white shadow-[0_8px_28px_rgba(15,23,42,0.12)] transition-opacity duration-300 ${
-              selectedUid ? "opacity-70" : "opacity-100"
-            }`}
+            className={`absolute z-10 flex flex-col items-center justify-center rounded-full bg-white shadow-[0_8px_28px_rgba(15,23,42,0.12)] transition-opacity duration-300 ${selectedUid ? "opacity-70" : "opacity-100"
+              }`}
             style={{
               width: px(CENTER_SIZE),
               height: px(CENTER_SIZE),
@@ -497,12 +512,20 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <span className="text-sm font-semibold tracking-tight text-zinc-900">
-              Event Scanner
-            </span>
-            <span className="mt-1 text-xs text-zinc-500">
-              {users.length} {users.length === 1 ? "user" : "users"}
-            </span>
+            <div className="relative flex flex-col items-center -mt-12">
+              <Mascot
+                directions="/mascots/frog-directions.webp"
+                reactions="/mascots/frog-reactions.webp"
+              />
+            </div>
+            <div className="relative z-20 flex flex-col items-center -mt-8">
+              <span className="text-sm font-semibold tracking-tight text-zinc-900">
+                {eventName || "Event Scanner"}
+              </span>
+              <span className="mt-1 text-xs text-zinc-500">
+                {users.length} {users.length === 1 ? "user" : "users"}
+              </span>
+            </div>
           </div>
 
           {/* User nodes */}
@@ -520,13 +543,12 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
                 }}
                 aria-expanded={isSelected}
                 aria-label={`${isSelected ? "Collapse" : "Expand"} profile for ${user.displayName ?? user.email ?? "user"}`}
-                className={`absolute rounded-full bg-white shadow-[0_6px_20px_rgba(15,23,42,0.1)] transition-all duration-300 hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 ${
-                  isSelected
+                className={`absolute rounded-full transition-all duration-300 hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-500 ${isSelected
                     ? "z-20 scale-110 ring-2 ring-sky-500 shadow-[0_10px_28px_rgba(14,165,233,0.28)]"
                     : dimmed
                       ? "z-[5] scale-95 opacity-35 hover:opacity-70"
                       : "z-[5] hover:z-20"
-                }`}
+                  }`}
                 style={{
                   width: px(NODE_SIZE),
                   height: px(NODE_SIZE),
@@ -542,64 +564,64 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
           {/* Branch detail cards (Whimsical-style children) */}
           {selectedPos
             ? branches.map((branch, i) => {
-                const content = (
-                  <>
-                    <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-zinc-100 text-[10px] font-semibold text-zinc-600">
-                      {branch.short}
+              const content = (
+                <>
+                  <span className={`flex size-7 shrink-0 items-center justify-center rounded-full ${branch.bgClass} ${branch.colorClass}`}>
+                    <branch.icon className="size-4" />
+                  </span>
+                  <span className="min-w-0 text-left">
+                    <span className="block truncate text-[11px] font-semibold leading-tight text-zinc-800">
+                      {branch.label}
                     </span>
-                    <span className="min-w-0 text-left">
-                      <span className="block truncate text-[11px] font-semibold leading-tight text-zinc-800">
-                        {branch.label}
-                      </span>
-                      <span className="block truncate text-[10px] leading-tight text-zinc-500">
-                        {branch.detail}
-                      </span>
+                    <span className="block truncate text-[10px] leading-tight text-zinc-500">
+                      {branch.detail}
                     </span>
-                  </>
-                );
+                  </span>
+                </>
+              );
 
-                const className =
-                  "absolute z-30 flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-white px-2.5 shadow-[0_8px_22px_rgba(15,23,42,0.12)] transition-transform duration-200 hover:scale-[1.03] hover:border-sky-300";
-                const style = {
-                  width: px(CHILD_W),
-                  height: px(CHILD_H),
-                  left: px(center + branch.x - CHILD_W / 2),
-                  top: px(center + branch.y - CHILD_H / 2),
-                  animation: `orbit-pop 380ms cubic-bezier(0.22, 1, 0.36, 1) ${90 + i * 45}ms both`,
-                };
+              const className =
+                "absolute z-30 flex items-center gap-2 rounded-xl border border-zinc-200/80 bg-white px-2.5 shadow-[0_8px_22px_rgba(15,23,42,0.12)] transition-transform duration-200 hover:scale-[1.03] hover:border-sky-300";
+              const style = {
+                width: px(CHILD_W),
+                height: px(CHILD_H),
+                left: px(center + branch.x - CHILD_W / 2),
+                top: px(center + branch.y - CHILD_H / 2),
+                animation: `orbit-pop 380ms cubic-bezier(0.22, 1, 0.36, 1) ${90 + i * 45}ms both`,
+              };
 
-                if (branch.href) {
-                  return (
-                    <a
-                      key={branch.id}
-                      href={branch.href}
-                      target={branch.id === "email" ? undefined : "_blank"}
-                      rel={
-                        branch.id === "email"
-                          ? undefined
-                          : "noopener noreferrer"
-                      }
-                      className={className}
-                      style={style}
-                      onClick={(e) => e.stopPropagation()}
-                      title={`${branch.label}: ${branch.detail}`}
-                    >
-                      {content}
-                    </a>
-                  );
-                }
-
+              if (branch.href) {
                 return (
-                  <div
+                  <a
                     key={branch.id}
+                    href={branch.href}
+                    target={branch.id === "email" ? undefined : "_blank"}
+                    rel={
+                      branch.id === "email"
+                        ? undefined
+                        : "noopener noreferrer"
+                    }
                     className={className}
                     style={style}
                     onClick={(e) => e.stopPropagation()}
+                    title={`${branch.label}: ${branch.detail}`}
                   >
                     {content}
-                  </div>
+                  </a>
                 );
-              })
+              }
+
+              return (
+                <div
+                  key={branch.id}
+                  className={className}
+                  style={style}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {content}
+                </div>
+              );
+            })
             : null}
 
           {/* Empty branches message */}
@@ -610,17 +632,17 @@ export function UserOrbitGraph({ users: usersProp }: UserOrbitGraphProps = {}) {
                 width: px(140),
                 left: px(
                   center +
-                    selectedPos.x +
-                    Math.cos(Math.atan2(selectedPos.y, selectedPos.x)) *
-                      BRANCH_DISTANCE -
-                    70,
+                  selectedPos.x +
+                  Math.cos(Math.atan2(selectedPos.y, selectedPos.x)) *
+                  BRANCH_DISTANCE -
+                  70,
                 ),
                 top: px(
                   center +
-                    selectedPos.y +
-                    Math.sin(Math.atan2(selectedPos.y, selectedPos.x)) *
-                      BRANCH_DISTANCE -
-                    18,
+                  selectedPos.y +
+                  Math.sin(Math.atan2(selectedPos.y, selectedPos.x)) *
+                  BRANCH_DISTANCE -
+                  18,
                 ),
                 animation: "orbit-pop 380ms cubic-bezier(0.22, 1, 0.36, 1) both",
               }}

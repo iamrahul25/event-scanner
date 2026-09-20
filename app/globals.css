@@ -53,3 +53,15 @@ body {
     stroke-dashoffset: 0;
   }
 }
+
+@layer base {
+  button,
+  [role="button"],
+  a {
+    cursor: pointer;
+  }
+  
+  button:disabled {
+    cursor: not-allowed;
+  }
+}

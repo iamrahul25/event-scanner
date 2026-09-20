@@ -16,6 +16,8 @@ export type SocialLinks = {
   linkedin: string | null;
   twitter: string | null;
   github: string | null;
+  youtube: string | null;
+  website: string | null;
 };
 
 export const EMPTY_SOCIAL_LINKS: SocialLinks = {
@@ -24,6 +26,8 @@ export const EMPTY_SOCIAL_LINKS: SocialLinks = {
   linkedin: null,
   twitter: null,
   github: null,
+  youtube: null,
+  website: null,
 };
 
 export type UserProfile = {
@@ -68,6 +72,8 @@ function toSocialLinks(data: Record<string, unknown>): SocialLinks {
     linkedin: readOptionalString(raw.linkedin),
     twitter: readOptionalString(raw.twitter),
     github: readOptionalString(raw.github),
+    youtube: readOptionalString(raw.youtube),
+    website: readOptionalString(raw.website),
   };
 }
 
@@ -101,4 +107,17 @@ export function subscribeToUsers(
     },
     (error) => onError?.(error),
   );
+}
+
+/** Fetch a single user's profile data. */
+export async function getUserProfile(uid: string): Promise<UserProfile | null> {
+  const snapshot = await getDoc(doc(db, "users", uid));
+  if (!snapshot.exists()) return null;
+  return toUserProfile(snapshot.id, snapshot.data() as Record<string, unknown>);
+}
+
+/** Update a single user's profile data. */
+export async function updateUserProfile(uid: string, data: Partial<UserProfile>) {
+  const ref = doc(db, "users", uid);
+  await setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true });
 }
